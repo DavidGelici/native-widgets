@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode, useCallback, useMemo } from "react";
+import { ReactElement, ReactNode, useCallback, useMemo, useState } from "react";
 import { Text, Pressable, View, ViewProps, Platform, TouchableOpacity, useWindowDimensions } from "react-native";
 import { ObjectItem, DynamicValue } from "mendix";
 import DeviceInfo from "react-native-device-info";
@@ -35,6 +35,14 @@ export const Gallery = <T extends ObjectItem>(props: GalleryProps<T>): ReactElem
     const lastItemId = props.items?.[props.items.length - 1]?.id;
     const { name, style, itemRenderer } = props;
     const { width } = useWindowDimensions();
+
+    // FlashList does not derive the height of a horizontal list from its content the way the old
+    // FlatList did: for a horizontal list it forces every cell to the list's own cross-axis height.
+    // When the list has no bounded height it collapses and clips the items. To restore the previous
+    // behavior we measure the natural height of an item off-list (unconstrained) and apply it as the
+    // list height. This keeps horizontal galleries working without requiring a bounded parent.
+    const [measuredItemHeight, setMeasuredItemHeight] = useState<number>();
+    const measureItem = props.items?.[0];
 
     const onEndReached = (): void => {
         if (props.pagination === "virtualScrolling" && props.hasMoreItems) {
@@ -140,6 +148,20 @@ export const Gallery = <T extends ObjectItem>(props: GalleryProps<T>): ReactElem
     return (
         <View testID={`${name}`} style={props.style.container}>
             {props.filters ? <View>{props.filters}</View> : null}
+            {!isScrollDirectionVertical && measureItem ? (
+                <View
+                    style={{ position: "absolute", opacity: 0, left: 0, top: 0 }}
+                    pointerEvents="none"
+                    onLayout={event => {
+                        const measured = event.nativeEvent.layout.height;
+                        if (measured > 0) {
+                            setMeasuredItemHeight(prev => (prev === undefined || measured > prev ? measured : prev));
+                        }
+                    }}
+                >
+                    {itemRenderer(children => <View style={style.listItem}>{children}</View>, measureItem)}
+                </View>
+            ) : null}
             <FlashList
                 {...(isScrollDirectionVertical && props.pullDown ? { onRefresh: props.pullDown } : {})}
                 {...(isScrollDirectionVertical ? { numColumns } : {})}
@@ -157,7 +179,10 @@ export const Gallery = <T extends ObjectItem>(props: GalleryProps<T>): ReactElem
                 onEndReachedThreshold={0.6}
                 scrollEventThrottle={50}
                 renderItem={renderItem}
-                style={props.style.list}
+                style={[
+                    props.style.list,
+                    !isScrollDirectionVertical && measuredItemHeight ? { height: measuredItemHeight } : undefined
+                ]}
                 testID={`${name}-list`}
             />
         </View>
